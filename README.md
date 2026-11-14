@@ -30,7 +30,7 @@ An animated Grafana dashboard that draws **your server as a live picture**: the 
 ## Try it in one minute (no hardware needed)
 
 ```bash
-git clone https://github.com/<your-user>/<this-repo>.git && cd <this-repo>
+git clone https://github.com/Unknowlars/grafana-truenas-case-canvas.git && cd grafana-truenas-case-canvas
 docker compose -f docker-compose.demo.yml up -d
 ```
 
