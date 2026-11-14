@@ -79,8 +79,8 @@ You need a Linux machine you can SSH into (a NAS, a mini PC, a Raspberry Pi 5 ..
 
 **Step 2: get the code**
 ```bash
-git clone https://github.com/<your-user>/<this-repo>.git
-cd <this-repo>
+git clone https://github.com/Unknowlars/grafana-truenas-case-canvas.git  
+cd grafana-truenas-case-canvas
 ```
 
 **Step 3: choose two passwords**
