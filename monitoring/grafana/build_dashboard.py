@@ -116,6 +116,10 @@ def data_uri(svg):
     (the literal http:// in xmlns provides it); otherwise it would be rewritten as a relative path."""
     svg = re.sub(r">\s+<", "><", svg.strip())
     assert "http://www.w3.org/2000/svg" in svg
+    # Full-case drawings (viewBox = the design size) must stretch with the panel like the percent-positioned overlays do. Without
+    # preserveAspectRatio="none" an SVG keeps its proportions inside the box and letterboxes, so labels drift off their parts.
+    if "viewBox='0 0 %d %d'" % (CW, CH) in svg[:600] and "preserveAspectRatio" not in svg[:600]:
+        svg = svg.replace("<svg ", "<svg preserveAspectRatio='none' ", 1)
     return "data:image/svg+xml;utf8," + quote(svg, safe=":/=' ,.;()-_@")
 
 
@@ -433,8 +437,14 @@ class View:
 
 
 def root_for(view, background_svg):
+    # Grafana ignores the root frame's background `size` (it keeps the picture's proportions, so it letterboxes whenever the panel is
+    # wider or taller than the 1100x742 drawing while every overlay is positioned in percent of the panel). The drawing is therefore
+    # a full-size element with `fill` as the bottom-most layer, the same way the other full-size layers are done.
+    base = View()
+    base.fixed_layer("case_background", background_svg)
+    view.elements.insert(0, base.elements[0])
     return {
-        "background": {"color": {"fixed": "transparent"}, "image": {"mode": "fixed", "fixed": data_uri(background_svg)}, "size": "fill"},
+        "background": {"color": {"fixed": "transparent"}},
         "border": {"color": {"fixed": "transparent"}},
         "constraint": {"horizontal": "left", "vertical": "top"},
         "elements": view.elements, "name": "Element root",
