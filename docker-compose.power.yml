@@ -1,0 +1,11 @@
+# Optional: show CPU package power (RAPL) while staying MONITOR-ONLY.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.power.yml up -d
+#
+# Docker hides the RAPL counters (/sys/devices/virtual/powercap) from normal containers and even unmasking them is not enough
+# (tested: still "Permission denied" without privileged). So this override makes the fan-gui container privileged. The app
+# stays monitor-only (FAN_CONTROL=0 is the default) and never writes to the fans, but a privileged container is a bigger
+# trust decision: only use it on a machine you control. docker-compose.control.yml already includes this.
+services:
+  fan-gui:
+    privileged: true

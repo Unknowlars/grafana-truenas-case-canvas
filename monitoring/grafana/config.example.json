@@ -1,0 +1,19 @@
+{
+  "assets_dir": "assets",
+  "job": "fan-gui",
+  "node_job": "node",
+  "drives": [
+    ["sda", "Samsung SSD 960 GB", "ssd"],
+    ["sdb", "Seagate IronWolf 12 TB", "hdd"],
+    ["sdc", "Seagate IronWolf 12 TB", "hdd"],
+    ["sdd", "Samsung SSD 960 GB", "ssd"]
+  ],
+  "pools": ["big_data", "new_ssd", "boot-pool"],
+  "labels": {
+    "title": "JONSBO N4 · TrueNAS",
+    "cpu": "RYZEN 7 2700",
+    "gpu": "ARC A310",
+    "fan1": "CPU FAN",
+    "fan2": "CASE FAN"
+  }
+}

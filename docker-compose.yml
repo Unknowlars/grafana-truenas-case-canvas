@@ -1,0 +1,108 @@
+# All-in-one stack: fan monitor/controller + Intel GPU exporter + node-exporter + Prometheus + Grafana,
+# with the datasource and the four case dashboards provisioned automatically.
+#
+#   cp .env.example .env        # set the two passwords
+#   docker compose up -d --build
+#   open http://<host>:3000     # Grafana (user admin, the password from .env); home dashboard = isometric case view
+#
+# Default = MONITOR-ONLY: nothing can write to your fans and no container is privileged.
+# To let the GUI control fans (ITE IT8655E / it87 driver only) see docker-compose.control.yml and the README.
+# Intel GPU data is optional: COMPOSE_PROFILES=intel-gpu in .env (needs an Intel GPU on the i915 or xe driver).
+name: truenas-fans
+
+services:
+  fan-gui:
+    build: ./fan-gui
+    image: local/fan-gui:latest
+    restart: unless-stopped
+    environment:
+      FAN_GUI_PASSWORD: ${FAN_GUI_PASSWORD:?set FAN_GUI_PASSWORD in .env}
+      FAN_GUI_USER: admin
+      FAN_CONTROL: ${FAN_CONTROL:-0}
+      FAN_HWMON_PREFIX: ${FAN_HWMON_PREFIX:-it8}
+      PORT: "8765"
+      GPU_EXPORTER_URL: http://intel-gpu-exporter:8080/metrics
+      GUARD_CPU_C: ${GUARD_CPU_C:-65}
+      GUARD_DRIVE_C: ${GUARD_DRIVE_C:-48}
+      GUARD_GPU_C: ${GUARD_GPU_C:-85}
+    volumes:
+      - fan-gui-data:/data
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${FAN_GUI_PORT:-18765}:8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8765), 2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional (profile "intel-gpu"): per-engine usage, power, frequency, RC6 and VRAM of Intel GPUs.
+  # Needs the host PID namespace to read other processes' DRM file descriptors.
+  intel-gpu-exporter:
+    profiles: ["intel-gpu"]
+    image: ghcr.io/lfventura/intel-gpu-exporter:1.0.1
+    restart: unless-stopped
+    pid: host
+    cap_add: [SYS_PTRACE]
+    security_opt: ["label=disable"]
+    environment:
+      REFRESH_PERIOD_MS: "10000"
+
+  # Host network so the network panel shows the real NICs; Prometheus reaches it through host.docker.internal.
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=:${NODE_EXPORTER_PORT:-9100}
+    volumes:
+      - /:/host:ro,rslave
+
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    restart: unless-stopped
+    environment:
+      FAN_GUI_PASSWORD: ${FAN_GUI_PASSWORD}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        printf '%s' "$$FAN_GUI_PASSWORD" > /tmp/fan-gui.pass
+        exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=${PROM_RETENTION:-30d}
+    volumes:
+      - ./stack/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      - fan-gui
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /dashboards/fan-control-isometric.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./stack/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/fan-control-isometric.json:/dashboards/fan-control-isometric.json:ro
+      - ./monitoring/grafana/fan-control-dashboard.json:/dashboards/fan-control-dashboard.json:ro
+      - ./monitoring/grafana/fan-control-isometric-light.json:/dashboards/fan-control-isometric-light.json:ro
+      - ./monitoring/grafana/fan-control-dashboard-light.json:/dashboards/fan-control-dashboard-light.json:ro
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  fan-gui-data:
+  prometheus-data:
+  grafana-data:

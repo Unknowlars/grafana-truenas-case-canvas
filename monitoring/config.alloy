@@ -1,0 +1,49 @@
+// Grafana Alloy: scrape fan-gui and remote-write to Prometheus / Mimir / Grafana Cloud.
+//
+// Run Alloy with the password in the environment (never put it in this file):
+//   FAN_GUI_PASSWORD=...  alloy run config.alloy
+// For Docker add `-e FAN_GUI_PASSWORD` (and the remote-write credentials if you use them).
+//
+// If Alloy runs on the TrueNAS host's Docker network, replace the target with the host's LAN IP
+// or `host.docker.internal` (add `extra_hosts: ["host.docker.internal:host-gateway"]`).
+
+prometheus.scrape "fan_gui" {
+  targets = [{
+    "__address__" = "YOUR_SERVER_IP:18765",   // the machine running fan-gui : PORT
+    "host"        = "truenas",
+  }]
+  job_name        = "fan-gui"
+  metrics_path    = "/metrics"
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+
+  basic_auth {
+    username = "admin"                         // FAN_GUI_USER
+    password = sys.env("FAN_GUI_PASSWORD")
+  }
+
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    // Prometheus must be started with --web.enable-remote-write-receiver for this URL.
+    url = "http://prometheus.example:9090/api/v1/write"
+
+    // Grafana Cloud / Mimir with auth:
+    // basic_auth {
+    //   username = sys.env("REMOTE_WRITE_USER")
+    //   password = sys.env("REMOTE_WRITE_PASSWORD")
+    // }
+  }
+}
+
+// Optional: only keep what you need (drops the Go runtime series if you ever scrape them).
+// prometheus.relabel "keep" {
+//   forward_to = [prometheus.remote_write.default.receiver]
+//   rule {
+//     source_labels = ["__name__"]
+//     regex         = "(fan_.*|fangui_.*|hw_.*|gpu_.*|cpu_.*|host_.*|zfs_.*)"
+//     action        = "keep"
+//   }
+// }

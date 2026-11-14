@@ -1,0 +1,11 @@
+apiVersion: 1
+providers:
+  - name: truenas-fans-demo
+    orgId: 1
+    folder: TrueNAS (demo)
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /dashboards

@@ -1,0 +1,19 @@
+# secrets and local configuration
+.env
+*.pass
+
+# runtime data and build output
+fan-gui/data/
+it87/out/
+*.ko
+
+# Python
+__pycache__/
+*.pyc
+
+# downloads and OS/editor files
+*.zip
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

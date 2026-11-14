@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fan Control</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1c2330;--mut:#667085;--line:#e3e6ec;--ok:#12805c;--warn:#b45309;--bad:#c0262d;--acc:#2563eb;--c1:#2563eb;--c2:#d97706;--c3:#0f766e;--c4:#9333ea}
+@media (prefers-color-scheme:dark){:root{--bg:#10141b;--card:#171c25;--fg:#e6e9ef;--mut:#8b94a7;--line:#262d3a;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--acc:#60a5fa;--c1:#60a5fa;--c2:#fbbf24;--c3:#2dd4bf;--c4:#c084fc}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.pill{font-size:12px;padding:2px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.pill.ok{color:var(--ok);border-color:var(--ok)}.pill.warn{color:var(--warn);border-color:var(--warn)}.pill.bad{color:var(--bad);border-color:var(--bad)}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(310px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
+.big{font-size:34px;font-weight:650;font-variant-numeric:tabular-nums}.unit{font-size:14px;color:var(--mut);font-weight:400}
+.row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px solid var(--line)}.row:last-child{border:0}
+.mut{color:var(--mut)}.tab{font-variant-numeric:tabular-nums}
+input[type=range]{width:100%}
+.ctl{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,select{font:inherit;padding:6px 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button.p{background:var(--acc);border-color:var(--acc);color:#fff}button.b{border-color:var(--bad);color:var(--bad)}
+button:disabled,input:disabled,select:disabled{opacity:.45;cursor:not-allowed}
+canvas{width:100%;height:140px;display:block}
+.legend span{margin-right:12px;font-size:12px}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px}
+#ev{font:12px ui-monospace,monospace;max-height:170px;overflow:auto;white-space:pre-wrap;color:var(--mut)}
+.banner{padding:10px 12px;border-radius:8px;margin-bottom:12px;border:1px solid var(--bad);color:var(--bad);display:none}
+.note{font-size:12px;color:var(--mut);margin-top:6px}
+.sec{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.bar{height:7px;background:var(--line);border-radius:4px;overflow:hidden;min-width:90px;flex:1;align-self:center;margin:0 8px}.bar i{display:block;height:100%;background:var(--acc)}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:2px 4px;text-align:right}th{color:var(--mut);font-weight:500}td:first-child,th:first-child{text-align:left}
+details summary{cursor:pointer;color:var(--mut);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<h1>Fan Control <span id="drv" class="pill">...</span><span id="grd" class="pill">...</span><span id="cpuinfo" class="pill"></span></h1>
+<div id="ban" class="banner"></div>
+
+<div class="grid" id="fans"></div>
+
+<div class="grid" style="margin-top:12px">
+ <div class="card"><h2>Temperatures</h2><div id="temps"></div></div>
+ <div class="card"><h2>Power</h2><div id="power"></div><div class="note">CPU: RAPL package energy. GPU: i915 hwmon energy counter. Both are live rates.</div></div>
+ <div class="card"><h2>Arc GPU (intel_gpu_top)</h2><div id="gpu"></div></div>
+ <div class="card"><h2>Drives</h2><div id="drives"></div></div>
+</div>
+
+<div class="card" style="margin-top:12px"><h2>Last hour</h2>
+ <div class="legend"><span><i style="background:var(--c1)"></i>CPU &deg;C</span><span><i style="background:var(--c2)"></i>Hottest drive &deg;C</span><span><i style="background:var(--c3)"></i>GPU &deg;C</span></div>
+ <canvas id="ch1"></canvas>
+ <div class="legend"><span><i style="background:var(--c1)"></i>CPU fan RPM</span><span><i style="background:var(--c2)"></i>Case fan RPM</span></div>
+ <canvas id="ch2"></canvas>
+ <div class="legend"><span><i style="background:var(--c1)"></i>CPU W</span><span><i style="background:var(--c3)"></i>GPU W</span></div>
+ <canvas id="ch3"></canvas>
+</div>
+
+<div class="card" style="margin-top:12px"><h2>Safety</h2>
+ <div class="note" id="safe"></div>
+ <div class="ctl"><button class="b" id="allauto">All fans &rarr; automatic (BIOS curve), smart mode off</button></div>
+</div>
+
+<div class="card" style="margin-top:12px"><h2>Events</h2><div id="ev"></div></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const hdr={'X-Requested-With':'fan-gui','Content-Type':'application/json'};
+let S=null, draft={}, tdraft={};
+async function api(p,b){const r=await fetch(p,b?{method:'POST',headers:hdr,body:JSON.stringify(b)}:{});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j}
+const fmt=t=>t==null?'-':t.toFixed(0)+'°C', w=v=>v==null?'-':v.toFixed(1)+' W';
+function pill(el,txt,cls){el.textContent=txt;el.className='pill '+(cls||'')}
+
+function buildFans(){
+  const box=$('#fans');
+  Object.keys(S.fan_cfg).forEach(n=>{
+    if($('#fan'+n))return;
+    const c=S.fan_cfg[n],sm=S.smart[n],d=document.createElement('div');d.className='card';d.id='fan'+n;
+    d.innerHTML=`<h2>${c.label}</h2><div class="big tab"><span id="rpm${n}">-</span> <span class="unit">RPM</span></div>
+    <div class="mut" style="font-size:12px">${c.detail}</div>
+    <div class="row"><span>Mode</span><b id="mode${n}">-</b></div>
+    <div class="row"><span>Duty</span><span class="tab" id="duty${n}">-</span></div>
+
+    <div class="sec"><b>Smart mode</b> <span class="mut">- hold a steady ${sm.sensor}</span>
+     <div class="ctl"><label><input type="checkbox" id="sm${n}"> enabled</label>
+       <span class="mut">target</span><input type="range" id="tg${n}" min="${sm.range[0]}" max="${sm.range[1]}" step="1" style="flex:1;min-width:110px"><b class="tab" id="tgv${n}"></b></div>
+     <div class="row"><span>Smoothed ${sm.sensor}</span><span class="tab" id="sma${n}">-</span></div>
+     <div class="row"><span>Smart duty / remembered idle duty</span><span class="tab" id="smd${n}">-</span></div>
+     <div class="note">Acts every ${n==1?20:30} s on a smoothed temperature, holds the speed inside a &plusmn;${sm.deadband}&deg; deadband, speeds up fast, slows down slowly (2 steps per ${n==1?2:3} min). Duty range ${sm.bounds[0]}-${sm.bounds[1]}.</div></div>
+
+    <div class="sec"><b>Manual</b>
+     <div class="ctl"><input type="range" id="sl${n}" min="${c.min}" max="${c.max}" step="5" value="${c.min}"><b class="tab" id="slv${n}"></b></div>
+     <div class="ctl"><select id="ttl${n}"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="120">2 h</option><option value="480">8 h</option></select>
+      <button class="p" id="app${n}">Set manual</button><button id="aut${n}">Automatic</button></div>
+     <div class="note">Floor ${c.min}/255. Expires and returns to automatic. Setting manual turns smart mode off.</div></div>
+
+    <div class="sec"><b>Profile</b> <span class="mut">- measure RPM at each duty (about ${n==1?3:4} min)</span>
+     <div class="ctl"><button id="pf${n}">Run profile</button><button id="pc${n}" class="b" style="display:none">Cancel</button><span id="pm${n}" class="mut"></span></div>
+     <div id="pt${n}"></div></div>`;
+    box.appendChild(d);
+    const sl=$('#sl'+n),tg=$('#tg'+n);
+    sl.oninput=()=>{draft[n]=+sl.value;$('#slv'+n).textContent=Math.round(sl.value/2.55)+'%'};
+    tg.oninput=()=>{tdraft[n]=1;$('#tgv'+n).textContent=tg.value+'°C'};
+    tg.onchange=async()=>{try{await api('/api/smart',{fan:+n,target:+tg.value});delete tdraft[n];refresh()}catch(e){alert(e.message)}};
+    $('#sm'+n).onchange=async e=>{try{await api('/api/smart',{fan:+n,enabled:e.target.checked,target:+tg.value});refresh()}catch(x){alert(x.message);e.target.checked=false}};
+    $('#app'+n).onclick=async()=>{try{await api('/api/fan',{fan:+n,mode:'manual',pwm:+sl.value,ttl_min:+$('#ttl'+n).value});refresh()}catch(e){alert(e.message)}};
+    $('#aut'+n).onclick=async()=>{try{await api('/api/fan',{fan:+n,mode:'auto'});refresh()}catch(e){alert(e.message)}};
+    $('#pf'+n).onclick=async()=>{if(!confirm('The profiler steps this fan through several speeds for a few minutes (never below tested values) and then returns it to automatic. Continue?'))return;try{await api('/api/profile',{fan:+n});refresh()}catch(e){alert(e.message)}};
+    $('#pc'+n).onclick=async()=>{await api('/api/profile',{action:'cancel'});refresh()};
+  });
+}
+function profTable(p){
+  if(!p||!p.results||!p.results.length)return '<div class="note">No profile yet.</div>';
+  const mx=Math.max(...p.results.map(r=>r.rpm));
+  return `<table><tr><th>duty</th><th>RPM</th><th></th><th>est. noise vs max</th></tr>`+p.results.map(r=>{
+    const db=r.rel_db!=null?r.rel_db:(50*Math.log10(r.rpm/mx));
+    return `<tr><td>${r.duty} (${Math.round(r.duty/2.55)}%)</td><td>${r.rpm}</td><td style="width:35%"><div class="bar" style="margin:0"><i style="width:${Math.round(100*r.rpm/mx)}%"></i></div></td><td>${db.toFixed(1)} dB</td></tr>`}).join('')+
+    `</table><div class="note">${p.taken?'Measured '+p.taken+'. ':''}Noise is an estimate from fan laws (50&middot;log10 of the speed ratio), not a measurement.</div>`;
+}
+function render(){
+  const s=S, ok=s.driver, ctl=s.control!==false;
+  pill($('#drv'),ok?'driver loaded':'driver NOT loaded',ok?'ok':'bad');
+  pill($('#grd'),s.guard.tripped?'GUARD TRIPPED':'guard ok',s.guard.tripped?'bad':'ok');
+  const c=s.cpu||{};$('#cpuinfo').textContent=`CPU ${c.mhz||'-'} MHz · ${c.governor||'-'} · boost ${c.boost==='1'?'on':'off'} · load ${(c.load||[]).join(' ')}`;
+  const b=$('#ban');
+  if(!ok){b.style.display='block';b.textContent='Fan driver (it87) is not loaded - monitoring only. For fan control load the it87 driver on the host (see the README).'}
+  else if(!ctl){b.style.display='block';b.style.color='var(--mut)';b.style.borderColor='var(--line)';b.textContent='Monitor-only mode (FAN_CONTROL=0): fans are only read. Controls are disabled. To control fans see the README (docker-compose.control.yml).'}
+  else if(s.guard.tripped){b.style.display='block';b.style.color='';b.style.borderColor='';b.textContent='Thermal guard tripped ('+s.guard.reason+'). Fans are on automatic; overrides and smart mode are paused until it cools down.'}
+  else b.style.display='none';
+  buildFans();
+  Object.keys(s.fan_cfg).forEach(n=>{
+    const f=(s.fans||{})[n]||{},m=(s.manual||{})[n],sm=s.smart[n],pr=s.profile.state,prun=pr.running&&pr.fan==n;
+    $('#rpm'+n).textContent=f.rpm==null?'-':f.rpm;
+    const en=f.enable, label=en===2?'Automatic (BIOS)':en===1?'Manual':en===0?'Full speed / no control':'-';
+    $('#mode'+n).textContent=prun?'Profiling...':m&&m.smart?'Smart':m?`Manual - ${Math.floor(m.left_s/60)}m left`:(sm.enabled?'Smart (waiting)':label);
+    $('#mode'+n).style.color=m||prun?'var(--warn)':'';
+    $('#duty'+n).textContent=f.pwm==null?'-':`${f.pwm}/255 (${Math.round(f.pwm/2.55)}%)`+(en===2?' (auto: reading may be inaccurate)':'');
+    const sl=$('#sl'+n);
+    if(!(n in draft)){const cur=m&&!m.smart?m.pwm:Math.max(f.pwm||0,s.fan_cfg[n].min);sl.value=cur;$('#slv'+n).textContent=Math.round(sl.value/2.55)+'%'}
+    if(!(n in tdraft)){$('#tg'+n).value=sm.target;$('#tgv'+n).textContent=sm.target+'°C'}
+    $('#sm'+n).checked=sm.enabled;
+    $('#sma'+n).textContent=sm.ema==null?'-':sm.ema.toFixed(1)+'°C  (target '+sm.target+'°)';
+    $('#smd'+n).textContent=`${sm.duty==null?'-':sm.duty} / ${sm.learned==null?'-':sm.learned}`;
+    [sl,$('#app'+n),$('#aut'+n),$('#ttl'+n),$('#sm'+n),$('#tg'+n)].forEach(e=>e.disabled=!ok||!ctl||prun);
+    $('#app'+n).disabled=!ok||!ctl||s.guard.tripped||prun;
+    $('#pf'+n).disabled=!ok||!ctl||s.guard.tripped||pr.running;
+    $('#pc'+n).style.display=prun?'':'none';
+    $('#pm'+n).textContent=prun?`step ${pr.step}/${pr.total}: ${pr.msg}`:(pr.fan==n&&pr.msg&&pr.msg!=='starting'?pr.msg:'');
+    const saved=s.profile.saved[n];
+    $('#pt'+n).innerHTML=prun&&pr.results.length?profTable({results:pr.results}):profTable(saved);
+  });
+  const t=s.temps||{};
+  $('#temps').innerHTML=[['CPU (Tctl)',t.cpu,s.limits.cpu],['GPU (Arc A310)',t.gpu,s.limits.gpu],['NVMe',t.nvme,null],['Memory (DIMM)',t.dimm,null],['Hottest drive',t.drive_max,s.limits.drive]]
+   .map(r=>`<div class="row"><span>${r[0]}</span><span class="tab">${fmt(r[1])}${r[2]?` <span class="mut">/ guard ${r[2]}°</span>`:''}</span></div>`).join('');
+  const p=s.power||{};
+  $('#power').innerHTML=`<div class="row"><span>CPU package</span><b class="tab">${w(p.cpu_w)}</b></div><div class="row"><span>GPU (hwmon)</span><b class="tab">${w(p.gpu_w)}</b></div>`+(s.gpu_top&&s.gpu_top.ok&&s.gpu_top.power_w!=null?`<div class="row"><span>GPU (intel_gpu_top)</span><span class="tab">${w(s.gpu_top.power_w)}</span></div>`:'');
+  const g=s.gpu_top||{};
+  if(!g.ok){$('#gpu').innerHTML='<span class="mut">intel-gpu-exporter not reachable (needs the container on the host network)</span>'}
+  else{
+    const eng=Object.entries(g.engines||{}).map(([k,v])=>`<div class="row"><span>${k}</span><div class="bar"><i style="width:${Math.min(100,v)}%"></i></div><span class="tab">${v.toFixed(0)}%</span></div>`).join('');
+    const cl=Object.entries(g.clients||{}).sort((a,b)=>b[1].busy-a[1].busy).map(([k,v])=>`<div class="row"><span>${k} <span class="mut">x${v.procs}</span></span><span class="tab">${v.busy.toFixed(1)}%</span></div>`).join('')||'<span class="mut">no programs using the GPU</span>';
+    $('#gpu').innerHTML=eng+`<div class="row"><span>Idle (RC6)</span><span class="tab">${g.rc6_pct==null?'-':g.rc6_pct.toFixed(0)+'%'}</span></div><div class="row"><span>Clock actual / requested</span><span class="tab">${g.freq_act??'-'} / ${g.freq_req??'-'} MHz</span></div><div class="row"><span>VRAM</span><span class="tab">${g.vram_used==null?'-':(g.vram_used/1048576).toFixed(0)} / ${g.vram_total==null?'-':(g.vram_total/1048576).toFixed(0)} MB</span></div><details><summary>Programs using the GPU</summary>${cl}</details>`;
+  }
+  $('#drives').innerHTML=(s.drives||[]).map(d=>`<div class="row"><span>${d.name} <span class="mut">${d.dev||''}</span></span><span class="tab">${fmt(d.temp)}</span></div>`).join('')||'<span class="mut">none</span>';
+  $('#allauto').disabled=!ctl;
+  $('#safe').textContent=`Guards: CPU ${s.limits.cpu}°, drive ${s.limits.drive}°, GPU ${s.limits.gpu}° -> all fans return to automatic. A fan under manual control that reads under 250 RPM is returned to automatic. Stopping this container restores automatic. Fan 3 (unused) and the BIOS curve are never modified.`;
+  $('#ev').textContent=(s.events||[]).join('\n');
+}
+function chart(cv,series,colors){
+  const dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*dpr;cv.height=h*dpr;
+  const g=cv.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,w,h);
+  const all=series.flat().filter(v=>v!=null);if(!all.length)return;
+  let lo=Math.min(...all),hi=Math.max(...all);if(hi-lo<5){lo-=2;hi+=3}
+  const cs=getComputedStyle(document.documentElement);
+  g.strokeStyle=cs.getPropertyValue('--line');g.fillStyle=cs.getPropertyValue('--mut');g.font='11px system-ui';
+  for(let i=0;i<=3;i++){const y=8+(h-20)*i/3;g.beginPath();g.moveTo(34,y);g.lineTo(w,y);g.stroke();g.fillText(Math.round(hi-(hi-lo)*i/3),0,y+4)}
+  series.forEach((ys,k)=>{g.strokeStyle=cs.getPropertyValue(colors[k]);g.lineWidth=1.6;g.beginPath();let st=false;
+    ys.forEach((v,i)=>{if(v==null){st=false;return}const x=34+(w-34)*i/Math.max(ys.length-1,1),y=8+(h-20)*(1-(v-lo)/(hi-lo));st?g.lineTo(x,y):g.moveTo(x,y);st=true});g.stroke()});
+}
+async function hist(){
+  const h=await api('/api/history');if(!h.length)return;
+  chart($('#ch1'),[h.map(x=>x.cpu),h.map(x=>x.drv),h.map(x=>x.gpu)],['--c1','--c2','--c3']);
+  chart($('#ch2'),[h.map(x=>x.f1),h.map(x=>x.f2)],['--c1','--c2']);
+  chart($('#ch3'),[h.map(x=>x.cw),h.map(x=>x.gw)],['--c1','--c3']);
+}
+async function refresh(){try{S=await api('/api/status');if(S.fan_cfg)render()}catch(e){pill($('#drv'),'offline','bad')}}
+$('#allauto').onclick=async()=>{await api('/api/auto_all',{});draft={};tdraft={};refresh()};
+refresh();hist();setInterval(refresh,2000);setInterval(hist,10000);
+</script>
+</body>
+</html>

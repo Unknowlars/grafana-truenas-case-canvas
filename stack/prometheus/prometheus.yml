@@ -1,0 +1,23 @@
+# Prometheus config for the all-in-one stack (mounted into the container by docker-compose.yml).
+# The fan-gui password is written to /tmp/fan-gui.pass by the container's start command from FAN_GUI_PASSWORD.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  # fan RPM / modes / temperatures / power / ZFS / Intel GPU data (relayed from the GPU exporter) - the case dashboards use this job
+  - job_name: fan-gui
+    metrics_path: /metrics
+    basic_auth:
+      username: admin
+      password_file: /tmp/fan-gui.pass
+    static_configs:
+      - targets: ["fan-gui:8765"]
+
+  # host metrics: CPU, network, disk throughput and the tray activity LEDs
+  - job_name: node
+    static_configs:
+      - targets: ["host.docker.internal:9100"]

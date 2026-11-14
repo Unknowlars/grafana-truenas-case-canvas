@@ -1,0 +1,12 @@
+# Build environment for the out-of-tree it87 driver (ITE IT8655E fan chip).
+# Pinned to the commit that was built, tested and documented in FAN_CONTROL_NOTES.md.
+FROM debian:trixie
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git make gcc libelf-dev bc flex bison libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+ARG IT87_COMMIT=bd7a566c8a60fe0308d67e26761e16260368191a
+RUN git init /src && cd /src \
+    && git remote add origin https://github.com/frankcrawford/it87.git \
+    && git fetch --depth 1 origin ${IT87_COMMIT} \
+    && git checkout FETCH_HEAD \
+    && echo ${IT87_COMMIT} > /COMMIT

@@ -1,0 +1,69 @@
+# Alert rules for the fan-gui metrics. Thresholds mirror the GUI's own guards, but these
+# page you; the GUI itself only reacts by returning the fans to the BIOS curve.
+groups:
+  - name: fan-gui
+    rules:
+      - alert: FanGuiDown
+        expr: up{job="fan-gui"} == 0
+        for: 3m
+        labels: {severity: warning}
+        annotations:
+          summary: "fan-gui is not reachable"
+          description: "Scrape of {{ $labels.instance }} failed for 3 minutes. Fans stay on the BIOS curve if the app is down."
+
+      - alert: FanDriverMissing
+        expr: fangui_driver_loaded == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Fan driver (it87) is not loaded"
+          description: "Usual cause: a TrueNAS kernel update. Rebuild with it87/build-it87.sh and insmod it. Fans are on the BIOS curve meanwhile."
+
+      - alert: FanStopped
+        expr: |
+          fan_speed_rpm{fan=~"1|2"} < 300
+            and on(fan) fan_mode{fan=~"1|2"} == 2
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.name }} reads under 300 RPM in automatic mode"
+          description: "Fan {{ $labels.fan }} ({{ $labels.name }}) may have failed or been unplugged."
+
+      - alert: ThermalGuardTripped
+        expr: fangui_guard_tripped == 1
+        for: 0m
+        labels: {severity: critical}
+        annotations:
+          summary: "fan-gui thermal guard tripped"
+          description: "A sensor crossed its guard threshold; all fans were returned to the BIOS curve and overrides are blocked."
+
+      - alert: CpuHot
+        expr: hw_temperature_celsius{sensor="cpu"} > 60
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "CPU above 60 C for 10 minutes ({{ $value | printf \"%.0f\" }} C)"
+
+      - alert: DriveHot
+        expr: hw_drive_temperature_celsius > 45
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Drive {{ $labels.dev }} ({{ $labels.drive }}) at {{ $value | printf \"%.0f\" }} C for 10 minutes"
+
+      - alert: SmartModeNotHoldingTemperature
+        expr: |
+          (fangui_smart_enabled == 1)
+            and (fangui_smart_temp_smoothed_celsius - fangui_smart_target_celsius > 5)
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Smart mode fan {{ $labels.fan }} is more than 5 C above target for 15 minutes"
+          description: "The fan may be at its maximum duty or the cooling is not enough for the target."
+
+      - alert: ZfsPoolNotOnline
+        expr: zfs_pool_online == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "ZFS pool {{ $labels.pool }} is {{ $labels.state }}"

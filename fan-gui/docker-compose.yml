@@ -1,0 +1,23 @@
+# Fan GUI alone (host network, fan control ENABLED, privileged). The all-in-one stack in the repo root is the easier start;
+# this file is for running just the controller next to your own Prometheus / Grafana.
+#   cd fan-gui
+#   cp .env.example .env && edit FAN_GUI_PASSWORD
+#   docker compose up -d --build
+#
+# privileged: needed to WRITE /sys (pwmN_enable / pwmN). Read-only monitoring would not need it.
+# network_mode: host: lets the app reach the intel-gpu-exporter on 127.0.0.1:7071.
+# Stopping the container (docker compose stop/down) returns every fan to automatic.
+services:
+  fan-gui:
+    build: .
+    image: local/fan-gui:latest
+    container_name: fan-gui
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    stop_grace_period: 15s
+    env_file: .env
+    environment:
+      PORT: ${PORT:-18765}
+    volumes:
+      - ./data:/data

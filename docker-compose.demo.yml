@@ -1,0 +1,54 @@
+# DEMO: see the dashboards with synthetic data - no hardware, no exporters, no passwords.
+#
+#   docker compose -f docker-compose.demo.yml up -d
+#   open http://localhost:3000      (anonymous viewer; admin login: admin / demo)
+#
+# A small script replays a 40 second load cycle (idle -> load -> cool-down): fans speed up and blur, components glow amber and
+# red, drives heat up with a delay, tray LEDs blink. The numbers are made up. Stop with: docker compose -f docker-compose.demo.yml down -v
+name: truenas-fans-demo
+
+services:
+  demo-exporter:
+    image: python:3.12-slim
+    restart: unless-stopped
+    command: ["python", "-u", "/app/demo_exporter.py"]
+    environment:
+      DEMO_CYCLE: ${DEMO_CYCLE:-40}
+    volumes:
+      - ./demo/demo_exporter.py:/app/demo_exporter.py:ro
+
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=2h
+    volumes:
+      - ./stack/prometheus/prometheus.demo.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - demo-exporter
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-demo}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 1s
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /dashboards/fan-control-isometric.json
+    volumes:
+      - ./stack/grafana/provisioning-demo:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/demo/fan-control-isometric.json:/dashboards/fan-control-isometric.json:ro
+      - ./monitoring/grafana/demo/fan-control-dashboard.json:/dashboards/fan-control-dashboard.json:ro
+      - ./monitoring/grafana/fan-control-isometric-light.json:/dashboards/fan-control-isometric-light.json:ro
+      - ./monitoring/grafana/fan-control-dashboard-light.json:/dashboards/fan-control-dashboard-light.json:ro
+    ports:
+      - "${DEMO_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus

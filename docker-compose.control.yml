@@ -1,0 +1,12 @@
+# Opt-in fan CONTROL. Adds write access to the fans, so read the README (safety section) first.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.control.yml up -d
+#
+# Requirements: an ITE Super I/O chip with the out-of-tree it87 driver loaded on the host (see it87/build-it87.sh).
+# privileged is needed only because the container must WRITE /sys (pwmN, pwmN_enable). Stopping the container
+# returns the fans to the BIOS curve.
+services:
+  fan-gui:
+    privileged: true
+    environment:
+      FAN_CONTROL: "1"
